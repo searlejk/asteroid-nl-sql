@@ -1,0 +1,9 @@
+config.json
+models/
+data/*.db
+data/*.building*
+data/build.log
+logs/
+__pycache__/
+.DS_Store
+data/*.gz

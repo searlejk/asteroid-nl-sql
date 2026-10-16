@@ -1,0 +1,4 @@
+requests
+openai
+llama-cpp-python   # only for the local model (provider "local")
+huggingface_hub    # only to download the local model

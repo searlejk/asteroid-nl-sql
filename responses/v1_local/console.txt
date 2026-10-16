@@ -1,0 +1,283 @@
+Model: local qwen2.5-coder-3b-instruct-q4_k_m.gguf   repair: False   questions: 16
+########################################################################
+Strategy: zero_shot
+- How many asteroids are there?
+  SQL: SELECT COUNT(*) FROM asteroids;
+  rows=1   match=True
+  Answer: There are 1,573,578 asteroids in the database.
+
+- How many near-Earth asteroids are there?
+  SQL: SELECT COUNT(DISTINCT designation) FROM asteroids WHERE is_neo = 1;
+  rows=1   match=True
+  Answer: There are 42,732 near-Earth asteroids.
+
+- How many asteroids will come within 1 million km of Earth in the next 10 years?
+  SQL: SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE dist_min_km < 1000000 AND approach_date BETWEEN date('now') AND date('now', '+10 years');
+  rows=1   match=False
+  Answer: - 285 asteroids will come within 1 million km of Earth in the next 10 years.
+
+- What is the closest an asteroid will come to Earth in the next year?
+  SQL: SELECT designation, approach_date, dist_au, dist_km, dist_ld FROM close_approaches WHERE approach_date >= date('now') AND approach_date < date('now', '+1 year') ORDER BY dist_au ASC LIMIT 1;
+  rows=1   match=True
+  Answer: - Asteroid 2026 TP6 will come closest to Earth on October 15, 2026, at a distance of 218,958 km (0.5696 LD).
+- This is the closest approach in the next year, within the 1900-2200 au range.
+
+- When will Apophis pass Earth, and how close will it get?
+  SQL: SELECT approach_date, dist_ld FROM close_approaches WHERE designation = '99942 Apophis (2004 MN4)' ORDER BY approach_date ASC LIMIT 1;
+  rows=0   match=False
+  Answer: No matched.
+
+- Which asteroid has the highest chance of hitting Earth?
+  SQL: SELECT designation, full_name, impact_probability, first_year, last_year, palermo_scale_cum, diameter_km FROM impact_risk ORDER BY impact_probability DESC LIMIT 1;
+  rows=1   match=True
+  Answer: - Asteroid 2010 RF12 has the highest chance of hitting Earth, with an impact probability of 0.102637.
+- It has a diameter of 0.0071 km, which is 0.0002 LD (1 LD = 384,400 km).
+
+- How many potentially hazardous asteroids are bigger than 1 km?
+  SQL: SELECT COUNT(DISTINCT designation) FROM asteroids WHERE is_pha = 1 AND diameter_est_km > 1;
+  rows=1   match=True
+  Answer: - 156 potentially hazardous asteroids are bigger than 1 km.
+
+- What is the largest asteroid?
+  SQL: SELECT full_name, diameter_est_km FROM asteroids ORDER BY diameter_est_km DESC LIMIT 1
+  rows=1   match=True
+  Answer: - The largest asteroid is 136199 Eris (2003 UB313), with a diameter of 6,345.43 km, or approximately 1.9 LD.
+
+- Which asteroids passed closer than the Moon in 2025?
+  SQL: SELECT designation, full_name, moid_ld FROM close_approaches WHERE approach_date = '2025-10-13'   AND moid_ld < 1 ORDER BY moid_ld ASC LIMIT 25;
+  ERROR OperationalError: no such column: moid_ld   match=False
+  Answer: Sorry, I couldn't turn that into a working database query. Try rephrasing it, for example with a specific distance, date or asteroid name.
+
+- How many asteroids have names?
+  SQL: SELECT COUNT(DISTINCT name) FROM asteroids WHERE name IS NOT NULL;
+  rows=1   match=True
+  Answer: - 26,567 asteroids have names.
+
+- What percentage of near-Earth asteroids are potentially hazardous?
+  SQL: SELECT CAST(SUM(CASE WHEN is_pha = 1 THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(*) FROM asteroids WHERE is_neo = 1;
+  rows=1   match=False
+  Answer: - 5.97% of near-Earth asteroids are potentially hazardous.
+
+- Which upcoming year will have the most asteroid flybys closer than the Moon?
+  SQL: SELECT T2.approach_date, COUNT(DISTINCT T1.designation) AS flyby_count FROM close_approaches AS T1 JOIN asteroids AS T2 ON T1.designation = T2.designation WHERE T1.dist_ld < 1 GROUP BY T2.approach_date ORDER BY flyby_count DESC LIMIT 1;
+  ERROR OperationalError: no such column: T2.approach_date   match=False
+  Answer: Sorry, I couldn't turn that into a working database query. Try rephrasing it, for example with a specific distance, date or asteroid name.
+
+- What is the fastest an asteroid has ever flown past Earth?
+  SQL: SELECT MAX(velocity_kms) AS max_velocity FROM close_approaches
+  rows=1   match=True
+  Answer: - The fastest asteroid ever to fly past Earth has a velocity of 67.37 km/s.
+
+- How many asteroids have orbits that come within 0.05 au of Earth's orbit?
+  SQL: SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE moid_au <= 0.05;
+  ERROR OperationalError: no such column: moid_au   match=False
+  Answer: Sorry, I couldn't turn that into a working database query. Try rephrasing it, for example with a specific distance, date or asteroid name.
+
+- Is any asteroid going to hit Earth?
+  SQL: SELECT designation FROM impact_risk WHERE impact_probability > 0
+  rows=1000   match=None
+  Answer: Yes, several asteroids are currently on a collision course with Earth.
+
+- Will we have a problem with any of the biggest near-Earth asteroids?
+  SQL: SELECT COUNT(DISTINCT designation) FROM asteroids WHERE is_neo = 1 AND diameter_est_km > 1000
+  rows=1   match=None
+  Answer: No problem with any of the biggest near-Earth asteroids.
+
+########################################################################
+Strategy: single_domain
+- How many asteroids are there?
+  SQL: SELECT COUNT(*) AS total_asteroids FROM asteroids;
+  rows=1   match=True
+  Answer: There are 1,573,578 asteroids in the database.
+
+- How many near-Earth asteroids are there?
+  SQL: SELECT COUNT(*) AS hazardous_asteroids FROM asteroids WHERE is_pha = 1;
+  rows=1   match=False
+  Answer: There are 2,550 near-Earth asteroids.
+
+- How many asteroids will come within 1 million km of Earth in the next 10 years?
+  SQL: SELECT COUNT(DISTINCT designation) AS asteroids FROM close_approaches WHERE approach_date BETWEEN date('now') AND date('now', '+10 years') AND dist_km < 1000000;
+  rows=1   match=True
+  Answer: - 56 asteroids will come within 1 million km of Earth in the next 10 years.
+
+- What is the closest an asteroid will come to Earth in the next year?
+  SQL: SELECT ca.full_name, ca.approach_time, ca.dist_km, ca.dist_ld, ca.velocity_kms FROM close_approaches ca WHERE ca.approach_date >= date('now') AND ca.approach_date < date('now', '+1 year') ORDER BY ca.dist_km ASC LIMIT 1;
+  rows=1   match=True
+  Answer: - The closest asteroid to Earth in the next year is (2026 TP6).
+- It will approach Earth on October 15, 2026.
+- The closest approach will be 218,958 km (0.5696 LD) away.
+- The asteroid's velocity at closest approach is 10.2862 km/s.
+
+- When will Apophis pass Earth, and how close will it get?
+  SQL: SELECT ca.full_name, ca.approach_time, ca.dist_km, ca.dist_ld, ca.velocity_kms FROM close_approaches ca JOIN asteroids a ON a.designation = ca.designation WHERE a.name = 'Apophis' AND ca.approach_date >= date('now') ORDER BY ca.approach_time LIMIT 1;
+  rows=1   match=False
+  Answer: - Apophis will pass Earth on April 13, 2029.
+- It will be 38,011.5 km (0.0988852 LD) away from Earth.
+- The velocity at the closest approach is 7.42254 km/s.
+
+- Which asteroid has the highest chance of hitting Earth?
+  SQL: SELECT full_name, impact_probability, first_year, last_year FROM impact_risk ORDER BY impact_probability DESC LIMIT 1;
+  rows=1   match=True
+  Answer: - Asteroid (2010 RF12) has the highest chance of hitting Earth, with an impact probability of 0.102637.
+
+- How many potentially hazardous asteroids are bigger than 1 km?
+  SQL: SELECT COUNT(*) AS hazardous_asteroids FROM asteroids WHERE is_pha = 1 AND diameter_est_km > 1;
+  rows=1   match=True
+  Answer: There are 156 potentially hazardous asteroids bigger than 1 km.
+
+- What is the largest asteroid?
+  SQL: SELECT full_name, diameter_est_km FROM asteroids ORDER BY diameter_est_km DESC LIMIT 1;
+  rows=1   match=True
+  Answer: - The largest asteroid is 136199 Eris (2003 UB313), with a diameter of 6,345.43 km, or approximately 1.9 LD.
+
+- Which asteroids passed closer than the Moon in 2025?
+  SQL: SELECT ca.full_name, ca.approach_time, ca.dist_km, ca.dist_ld, ca.velocity_kms FROM close_approaches ca JOIN asteroids a ON a.designation = ca.designation WHERE ca.approach_date BETWEEN '2025-01-01' AND '2025-12-31' AND ca.dist_ld < 1 ORDER BY ca.dist_km;
+  rows=189   match=True
+  Answer: - Asteroids (2025 UC11), (2025 TF), (2025 BP6), and (2025 OS) passed closer than the Moon in 2025.
+- These asteroids had approach distances of 6599.19 km, 6780.47 km, 9711.95 km, and 10458.1 km, respectively.
+- Their closest approach dates were on October 30, 10/1, January 26, and July 19, 2025.
+- The velocities of these asteroids were 11.36 km/s, 20.88 km/s, 21.05 km/s, and 12.70 km/s, respectively.
+
+- How many asteroids have names?
+  SQL: SELECT COUNT(*) AS asteroids_with_names FROM asteroids WHERE name IS NOT NULL;
+  rows=1   match=True
+  Answer: - There are 26,567 asteroids with names.
+
+- What percentage of near-Earth asteroids are potentially hazardous?
+  SQL: SELECT CAST(SUM(CASE WHEN is_pha = 1 THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(*) FROM asteroids WHERE is_neo = 1;
+  rows=1   match=False
+  Answer: - 5.97% of near-Earth asteroids are potentially hazardous.
+
+- Which upcoming year will have the most asteroid flybys closer than the Moon?
+  SQL: SELECT approach_date, COUNT(*) AS flybys FROM close_approaches WHERE approach_date BETWEEN date('now') AND date('now', '+1 year') GROUP BY approach_date ORDER BY flybys DESC LIMIT 1;
+  rows=1   match=False
+  Answer: - The upcoming year with the most asteroid flybys closer than the Moon is 2026.
+- There were 13 flybys recorded on October 13, 2026.
+
+- What is the fastest an asteroid has ever flown past Earth?
+  SQL: SELECT ca.full_name, ca.approach_time, ca.dist_km, ca.dist_ld, ca.velocity_kms FROM close_approaches ca JOIN asteroids a ON a.designation = ca.designation WHERE ca.velocity_kms = (SELECT MAX(velocity_kms) FROM close_approaches) ORDER BY ca.approach_time LIMIT 1;
+  rows=1   match=True
+  Answer: - The fastest asteroid to fly past Earth has been (2020 BZ12), which approached Earth on January 25, 1978, at a velocity of 67.37 km/s.
+- This asteroid was 13,186,100 km (34.3031 lunar distances) away from Earth when it flew past.
+
+- How many asteroids have orbits that come within 0.05 au of Earth's orbit?
+  SQL: SELECT COUNT(DISTINCT designation) AS asteroids FROM close_approaches WHERE moid_au <= 0.05;
+  ERROR OperationalError: no such column: moid_au   match=False
+  Answer: Sorry, I couldn't turn that into a working database query. Try rephrasing it, for example with a specific distance, date or asteroid name.
+
+- Is any asteroid going to hit Earth?
+  SQL: SELECT COUNT(*) AS potential_impacts FROM impact_risk WHERE impact_probability > 0;
+  rows=1   match=None
+  Answer: Yes, there are 2,221 asteroids with a potential impact probability greater than 0.
+
+- Will we have a problem with any of the biggest near-Earth asteroids?
+  SQL: SELECT COUNT(*) AS hazardous_asteroids FROM asteroids WHERE is_pha = 1 AND diameter_est_km > 1000;
+  rows=1   match=None
+  Answer: No problem with any of the biggest near-Earth asteroids.
+
+########################################################################
+Strategy: cross_domain
+- How many asteroids are there?
+  SQL: SELECT COUNT(*) AS asteroid_count FROM asteroids;
+  rows=1   match=True
+  Answer: There are 1,573,578 asteroids in the database.
+
+- How many near-Earth asteroids are there?
+  SQL: SELECT COUNT(*) AS near_earth_asteroids FROM asteroids WHERE is_neo = 1;
+  rows=1   match=True
+  Answer: There are 42,732 near-Earth asteroids.
+
+- How many asteroids will come within 1 million km of Earth in the next 10 years?
+  SQL: SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE dist_min_km < 1000000 AND approach_date >= date('now') AND approach_date < date('now', '+10 years');
+  rows=1   match=False
+  Answer: - 285 asteroids will come within 1 million km of Earth in the next 10 years.
+
+- What is the closest an asteroid will come to Earth in the next year?
+  SQL: SELECT ca.approach_date, ca.dist_au, ca.dist_km, ca.dist_ld FROM close_approaches ca WHERE ca.approach_date >= date('now') AND ca.approach_date < date('now', '+1 year') ORDER BY ca.dist_au ASC LIMIT 1;
+  rows=1   match=True
+  Answer: - The closest an asteroid will come to Earth in the next year is on October 15, 2026.
+- It will be 218,958 km (0.569609 LD) away.
+
+- When will Apophis pass Earth, and how close will it get?
+  SQL: SELECT ca.approach_date, ca.dist_km FROM close_approaches ca JOIN asteroids a ON ca.designation = a.designation WHERE a.name = 'Apophis' ORDER BY ca.approach_date LIMIT 1;
+  rows=1   match=False
+  Answer: - Apophis will pass Earth on April 13, 1907, at a distance of 4,280,480 km (1,370 LD).
+
+- Which asteroid has the highest chance of hitting Earth?
+  SQL: SELECT designation, full_name, impact_probability FROM impact_risk ORDER BY impact_probability DESC LIMIT 1;
+  rows=1   match=True
+  Answer: - Asteroid 2010 RF12 has the highest chance of hitting Earth, with an impact probability of 0.102637.
+
+- How many potentially hazardous asteroids are bigger than 1 km?
+  SQL: SELECT COUNT(*) AS hazardous_asteroids FROM asteroids WHERE is_pha = 1 AND diameter_est_km > 1;
+  rows=1   match=True
+  Answer: There are 156 potentially hazardous asteroids bigger than 1 km.
+
+- What is the largest asteroid?
+  SQL: SELECT full_name, diameter_est_km FROM asteroids ORDER BY diameter_est_km DESC LIMIT 1;
+  rows=1   match=True
+  Answer: - The largest asteroid is 136199 Eris (2003 UB313), with a diameter of 6,345.43 km, or approximately 1.9 LD.
+
+- Which asteroids passed closer than the Moon in 2025?
+  SQL: SELECT a.designation, a.full_name, ca.dist_ld FROM asteroids a JOIN close_approaches ca ON a.designation = ca.designation WHERE ca.approach_date = '2025-12-31' AND ca.dist_ld < 1 ORDER BY ca.dist_ld ASC LIMIT 25;
+  rows=0   match=False
+  Answer: No matched.
+
+- How many asteroids have names?
+  SQL: SELECT COUNT(DISTINCT designation) FROM asteroids WHERE name IS NOT NULL;
+  rows=1   match=True
+  Answer: - 26,567 asteroids have names.
+
+- What percentage of near-Earth asteroids are potentially hazardous?
+  SQL: SELECT CAST(SUM(CASE WHEN is_pha = 1 THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(*) FROM asteroids WHERE is_neo = 1;
+  rows=1   match=False
+  Answer: - 5.97% of near-Earth asteroids are potentially hazardous.
+
+- Which upcoming year will have the most asteroid flybys closer than the Moon?
+  SQL: SELECT T2.approach_date, COUNT(DISTINCT T1.designation) AS flybys FROM close_approaches AS T1 JOIN asteroids AS T2 ON T1.designation = T2.designation WHERE T1.dist_ld < 1 AND T1.approach_date > date('now') GROUP BY T2.approach_date ORDER BY flybys DESC LIMIT 1;
+  ERROR OperationalError: no such column: T2.approach_date   match=False
+  Answer: Sorry, I couldn't turn that into a working database query. Try rephrasing it, for example with a specific distance, date or asteroid name.
+
+- What is the fastest an asteroid has ever flown past Earth?
+  SQL: SELECT MAX(velocity_kms) AS max_velocity FROM close_approaches;
+  rows=1   match=True
+  Answer: - The fastest asteroid ever to fly past Earth has a velocity of 67.37 km/s.
+
+- How many asteroids have orbits that come within 0.05 au of Earth's orbit?
+  SQL: SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE moid_au <= 0.05;
+  ERROR OperationalError: no such column: moid_au   match=False
+  Answer: Sorry, I couldn't turn that into a working database query. Try rephrasing it, for example with a specific distance, date or asteroid name.
+
+- Is any asteroid going to hit Earth?
+  SQL: SELECT COUNT(*) > 0 FROM impact_risk WHERE impact_probability > 0;
+  rows=1   match=None
+  Answer: Yes, there is an asteroid with a high impact probability.
+
+- Will we have a problem with any of the biggest near-Earth asteroids?
+  SQL: SELECT designation, full_name, diameter_est_km, moid_ld FROM asteroids WHERE is_neo = 1 AND diameter_est_km > 1000 AND moid_ld < 1 ORDER BY diameter_est_km DESC LIMIT 25;
+  rows=0   match=None
+  Answer: Nothing matched.
+
+# Strategy comparison (local qwen2.5-coder-3b-instruct-q4_k_m.gguf, 20261013_160132, repair=False)
+
+| Question | zero_shot | single_domain | cross_domain |
+|---|---|---|---|
+| How many asteroids are there? | ✅ | ✅ | ✅ |
+| How many near-Earth asteroids are there? | ✅ | ❌ | ✅ |
+| How many asteroids will come within 1 million km of Earth in the next 10 years? | ❌ | ✅ | ❌ |
+| What is the closest an asteroid will come to Earth in the next year? | ✅ | ✅ | ✅ |
+| When will Apophis pass Earth, and how close will it get? | ❌ | ❌ | ❌ |
+| Which asteroid has the highest chance of hitting Earth? | ✅ | ✅ | ✅ |
+| How many potentially hazardous asteroids are bigger than 1 km? | ✅ | ✅ | ✅ |
+| What is the largest asteroid? | ✅ | ✅ | ✅ |
+| Which asteroids passed closer than the Moon in 2025? | error | ✅ | ❌ |
+| How many asteroids have names? | ✅ | ✅ | ✅ |
+| What percentage of near-Earth asteroids are potentially hazardous? | ❌ | ❌ | ❌ |
+| Which upcoming year will have the most asteroid flybys closer than the Moon? | error | ❌ | error |
+| What is the fastest an asteroid has ever flown past Earth? | ✅ | ✅ | ✅ |
+| How many asteroids have orbits that come within 0.05 au of Earth's orbit? | error | error | error |
+| Is any asteroid going to hit Earth? | (manual) | (manual) | (manual) |
+| Will we have a problem with any of the biggest near-Earth asteroids? | (manual) | (manual) | (manual) |
+| **Execution accuracy** | **8/14** | **9/14** | **8/14** |
+
+Tokens used: {'prompt_tokens': 140581, 'completion_tokens': 3175}

@@ -1,0 +1,78 @@
+[
+ {
+  "question": "How many asteroids are there?",
+  "gold": "SELECT COUNT(*) FROM asteroids"
+ },
+ {
+  "question": "How many near-Earth asteroids are there?",
+  "gold": "SELECT COUNT(*) FROM asteroids WHERE is_neo = 1"
+ },
+ {
+  "question": "How many asteroids will come within 1 million km of Earth in the next 10 years?",
+  "gold": "SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE approach_date BETWEEN date('now') AND date('now', '+10 years') AND dist_km < 1000000"
+ },
+ {
+  "question": "What is the closest an asteroid will come to Earth in the next year?",
+  "gold": "SELECT dist_km FROM close_approaches WHERE approach_date BETWEEN date('now') AND date('now', '+1 year') ORDER BY dist_km LIMIT 1"
+ },
+ {
+  "question": "When will Apophis pass Earth, and how close will it get?",
+  "gold": "SELECT ca.dist_km FROM close_approaches ca JOIN asteroids a ON a.designation = ca.designation WHERE a.name = 'Apophis' AND ca.approach_date >= date('now') ORDER BY ca.approach_time LIMIT 1"
+ },
+ {
+  "question": "Which asteroid has the highest chance of hitting Earth?",
+  "gold": "SELECT full_name FROM impact_risk ORDER BY impact_probability DESC LIMIT 1"
+ },
+ {
+  "question": "How many potentially hazardous asteroids are bigger than 1 km?",
+  "gold": "SELECT COUNT(*) FROM asteroids WHERE is_pha = 1 AND diameter_est_km > 1"
+ },
+ {
+  "question": "What is the largest asteroid?",
+  "gold": "SELECT full_name FROM asteroids ORDER BY diameter_est_km DESC LIMIT 1"
+ },
+ {
+  "question": "Which asteroids passed closer than the Moon in 2025?",
+  "gold": "SELECT full_name FROM close_approaches WHERE approach_date BETWEEN '2025-01-01' AND '2025-12-31' AND dist_ld < 1"
+ },
+ {
+  "question": "How many asteroids have names?",
+  "gold": "SELECT COUNT(*) FROM asteroids WHERE name IS NOT NULL"
+ },
+ {
+  "question": "What percentage of near-Earth asteroids are potentially hazardous?",
+  "gold": "SELECT 100.0 * SUM(is_pha) / COUNT(*) FROM asteroids WHERE is_neo = 1"
+ },
+ {
+  "question": "Which upcoming year will have the most asteroid flybys closer than the Moon?",
+  "gold": "SELECT substr(approach_date, 1, 4) FROM close_approaches WHERE dist_ld < 1 AND approach_date >= date('now') GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1"
+ },
+ {
+  "question": "What is the fastest an asteroid has ever flown past Earth?",
+  "gold": "SELECT MAX(velocity_kms) FROM close_approaches WHERE approach_date <= date('now')"
+ },
+ {
+  "question": "How many asteroids have orbits that come within 0.05 au of Earth's orbit?",
+  "gold": "SELECT COUNT(*) FROM asteroids WHERE moid_au <= 0.05"
+ },
+ {
+  "question": "Is any asteroid going to hit Earth?",
+  "gold": null,
+  "note": "Open-ended: judge the friendly answer by hand (should cite the Sentry list and that probabilities are tiny)."
+ },
+ {
+  "question": "Will we have a problem with any of the biggest near-Earth asteroids?",
+  "gold": null,
+  "note": "Vague on purpose, like the dog-show texting question in the class sample post."
+ },
+ {
+  "question": "How many elephants does the heaviest asteroid weigh?",
+  "gold": null,
+  "note": "Unanswerable: the database has no masses. Should say so, not invent a proxy (v2 summed all diameters)."
+ },
+ {
+  "question": "What day of the week is it today?",
+  "gold": null,
+  "note": "Out of scope: not in the data. v2 wrote SELECT strftime('%A', ...) (NULL) and the answer step invented 'Wednesday'."
+ }
+]

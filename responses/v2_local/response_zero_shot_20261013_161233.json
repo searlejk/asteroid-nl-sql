@@ -1,0 +1,349 @@
+{
+  "strategy": "zero_shot",
+  "model": "local qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+  "repair": false,
+  "prompt_prefix": [
+    {
+      "role": "system",
+      "content": "You translate questions about a NASA asteroid database into one SQLite SELECT query.\nRules:\n- Output only the SQL inside a ```sql code block. One statement. Read-only: SELECT or WITH only.\n- Use only tables and columns from the schema. Flags are 1/0. Dates are ISO text, so compare them as strings or with date().\n- Today's date is 2026-10-13; in SQL use date('now') for \"today\", \"upcoming\", \"next\", \"this year\".\n- For size questions use diameter_est_km. For \"potentially hazardous\" use is_pha = 1. For \"near-Earth\" use is_neo = 1.\n- \"Closest approach\", \"fly by\", \"pass within X of Earth\" -> the close_approaches table (actual flybys).\n  \"Orbit comes within\" or MOID -> asteroids.moid_*. Close approaches cover 1900-2200 only.\n- Convert distance units to the matching column (km -> dist_km, lunar distances / \"the Moon's distance\" -> dist_ld, au -> dist_au).\n  \"Closer than the Moon\" means dist_ld < 1. 1 million km is 1000000.\n- Column locations: moid_* columns exist only in asteroids; dist_*, approach_date and velocity_kms only in close_approaches.\n  Use the nominal dist_* columns (not dist_min_km/dist_max_km) unless the question is about uncertainty.\n- Year of a flyby: substr(approach_date, 1, 4). \"Ever\"/\"has passed\" means approach_date <= date('now'); \"will\" means >= date('now').\n- When counting asteroids from close_approaches, use COUNT(DISTINCT designation).\n- When listing asteroids, include full_name and the columns that answer the question; add LIMIT 25 unless the user asks for more.\n- Look up named asteroids with name = 'Apophis' (case-sensitive proper name) or designation."
+    },
+    {
+      "role": "user",
+      "content": "-- NASA/JPL asteroid database (SQLite). Units are in the column names.\n-- 1 au = 149,597,870.7 km. 1 lunar distance (LD) = 384,400 km (Earth-Moon distance).\n-- Flags (is_*) are 1 = yes, 0 = no. Dates are ISO text 'YYYY-MM-DD'.\n\n-- Every known asteroid (JPL Small-Body Database). Includes dwarf planets JPL lists as asteroids (Ceres, Pluto, Eris).\nCREATE TABLE asteroids (\n    spkid               INTEGER PRIMARY KEY,  -- JPL id\n    designation         TEXT NOT NULL,        -- primary designation, e.g. '433' or '2024 YR4'; joins to close_approaches.designation and impact_risk.designation\n    name                TEXT,                 -- proper name if it has one, e.g. 'Eros', 'Apophis', 'Bennu' (NULL for most)\n    full_name           TEXT,                 -- e.g. '433 Eros (A898 PA)', '99942 Apophis (2004 MN4)'\n    is_numbered         INTEGER,              -- 1 = has a permanent number (well-determined orbit)\n    is_neo              INTEGER,              -- 1 = near-Earth object (perihelion < 1.3 au)\n    is_pha              INTEGER,              -- 1 = potentially hazardous asteroid (moid_au <= 0.05 and abs_magnitude_h <= 22)\n    orbit_class         TEXT,                 -- code, see orbit_classes.code (e.g. 'APO' Apollo, 'MBA' main belt)\n    abs_magnitude_h     REAL,                 -- absolute magnitude H (smaller = bigger/brighter)\n    diameter_km         REAL,                 -- measured diameter in km (NULL for most asteroids)\n    diameter_est_km     REAL,                 -- measured diameter if known, else estimated from H; use this for size questions\n    albedo              REAL,                 -- surface reflectivity 0-1\n    rotation_period_h   REAL,                 -- spin period in hours\n    eccentricity        REAL,\n    semi_major_axis_au  REAL,\n    perihelion_au       REAL,                 -- closest distance to the Sun\n    aphelion_au         REAL,                 -- farthest distance from the Sun\n    inclination_deg     REAL,\n    orbital_period_years REAL,\n    moid_au             REAL,                 -- minimum orbit intersection distance with Earth's orbit (how close the orbits come, not an actual flyby)\n    moid_km             REAL,\n    moid_ld             REAL,                 -- same in lunar distances\n    first_observed      TEXT,                 -- date of first observation\n    last_observed       TEXT,\n    observations        INTEGER               -- number of observations used in the orbit fit\n);\n\n-- Close approaches (flybys) of asteroids to Earth, 1900-2200, within 0.2 au. Past and predicted future events.\nCREATE TABLE close_approaches (\n    id                  INTEGER PRIMARY KEY,\n    designation         TEXT NOT NULL,        -- references asteroids.designation\n    full_name           TEXT,\n    approach_time       TEXT NOT NULL,        -- 'YYYY-MM-DD HH:MM' (TDB, close to UTC)\n    approach_date       TEXT NOT NULL,        -- 'YYYY-MM-DD'\n    dist_au             REAL,                 -- nominal distance from Earth's center at closest approach\n    dist_km             REAL,\n    dist_ld             REAL,                 -- in lunar distances\n    dist_min_km         REAL,                 -- 3-sigma minimum possible distance\n    dist_max_km         REAL,\n    velocity_kms        REAL,                 -- speed relative to Earth, km/s\n    abs_magnitude_h     REAL\n);\n\n-- NASA Sentry impact-risk list: asteroids with a non-zero chance of hitting Earth in the next ~100 years.\nCREATE TABLE impact_risk (\n    designation         TEXT PRIMARY KEY,     -- references asteroids.designation\n    full_name           TEXT,\n    impact_probability  REAL,                 -- cumulative probability of impact (0-1)\n    potential_impacts   INTEGER,              -- number of possible impact dates found\n    first_year          INTEGER,              -- first year with a possible impact\n    last_year           INTEGER,\n    palermo_scale_cum   REAL,                 -- Palermo hazard scale (higher = more concerning; < -2 means no concern)\n    palermo_scale_max   REAL,\n    torino_scale_max    INTEGER,              -- Torino scale 0-10 (0 = no hazard)\n    diameter_km         REAL,                 -- estimated diameter\n    velocity_kms        REAL,                 -- impact velocity\n    abs_magnitude_h     REAL,\n    last_observed       TEXT\n);\n\n-- Lookup for asteroids.orbit_class.\nCREATE TABLE orbit_classes (\n    code                TEXT PRIMARY KEY,     -- e.g. 'APO'\n    name                TEXT,                 -- e.g. 'Apollo'\n    description         TEXT\n);\n\n-- Facts about this dataset (key/value), e.g. key = 'fetched_utc'.\nCREATE TABLE dataset_info (\n    key                 TEXT PRIMARY KEY,\n    value               TEXT\n);\n\n/* 3 example rows from asteroids:\ndesignation | name | full_name | is_neo | is_pha | orbit_class | diameter_est_km | moid_ld\n433 | Eros | 433 Eros (A898 PA) | 1 | 0 | AMO | 16.84 | 57.98668765426638\n99942 | Apophis | 99942 Apophis (2004 MN4) | 1 | 1 | ATE | 0.34 | 0.04203061923933402\n101955 | Bennu | 101955 Bennu (1999 RQ36) | 1 | 1 | APO | 0.48444 | 1.2531351291727368\n*/\n/* 3 example rows from close_approaches:\ndesignation | full_name | approach_time | dist_km | dist_ld | velocity_kms\n99942 | 99942 Apophis (2004 MN4) | 2029-04-13 21:46 | 38011.45916295157 | 0.0988851695186045 | 7.42253895678452\n99942 | 99942 Apophis (2004 MN4) | 2116-04-12 21:44 | 2627072.7362613273 | 6.834216275393671 | 6.39045174329063\n99942 | 99942 Apophis (2004 MN4) | 2102-09-11 20:52 | 3499720.3257977692 | 9.1043712949994 | 5.66609899314895\n*/\n/* 3 example rows from impact_risk:\ndesignation | impact_probability | first_year | last_year | palermo_scale_cum | diameter_km\n29075 | 0.0003633 | 2880 | 2880 | -0.95 | 1.3\n101955 | 0.000571699999999996 | 2178 | 2290 | -1.4 | 0.49\n2008 JL3 | 0.0001658147615 | 2027 | 2122 | -2.38 | 0.029\n*/\n/* 3 example rows from orbit_classes:\ncode | name\nIEO | Atira\nATE | Aten\nAPO | Apollo\n*/\n\nQuestion: <question>"
+    }
+  ],
+  "questionResults": [
+    {
+      "question": "How many asteroids are there?",
+      "sql": "SELECT COUNT(*) FROM asteroids;",
+      "queryRawResponse": "[(1573578,)]",
+      "friendlyResponse": "There are 1,573,578 asteroids in the database.",
+      "error": "None",
+      "gold_sql": "SELECT COUNT(*) FROM asteroids",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT COUNT(*) FROM asteroids;",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 7553,
+        "sql_exec": 3.8,
+        "answer_llm": 1943,
+        "total": 9512
+      }
+    },
+    {
+      "question": "How many near-Earth asteroids are there?",
+      "sql": "SELECT COUNT(DISTINCT designation) FROM asteroids WHERE is_neo = 1;",
+      "queryRawResponse": "[(42732,)]",
+      "friendlyResponse": "There are 42,732 near-Earth asteroids.",
+      "error": "None",
+      "gold_sql": "SELECT COUNT(*) FROM asteroids WHERE is_neo = 1",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT COUNT(DISTINCT designation) FROM asteroids WHERE is_neo = 1;",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 7276,
+        "sql_exec": 174.9,
+        "answer_llm": 1881,
+        "total": 9332
+      }
+    },
+    {
+      "question": "How many asteroids will come within 1 million km of Earth in the next 10 years?",
+      "sql": "SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE dist_km < 1000000 AND approach_date >= date('now') AND approach_date < date('now', '+10 years');",
+      "queryRawResponse": "[(56,)]",
+      "friendlyResponse": "- 56 asteroids will come within 1 million km of Earth in the next 10 years.",
+      "error": "None",
+      "gold_sql": "SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE approach_date BETWEEN date('now') AND date('now', '+10 years') AND dist_km < 1000000",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE dist_km < 1000000 AND approach_date >= date('now') AND approach_date < date('now', '+10 years');",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 8872,
+        "sql_exec": 291.8,
+        "answer_llm": 2375,
+        "total": 11539
+      }
+    },
+    {
+      "question": "What is the closest an asteroid will come to Earth in the next year?",
+      "sql": "SELECT designation, approach_date, dist_au, dist_km, dist_ld, velocity_kms\nFROM close_approaches\nWHERE approach_date >= date('now') AND approach_date < date('now', '+1 year')\nORDER BY dist_au ASC\nLIMIT 1;",
+      "queryRawResponse": "[('2026 TP6', '2026-10-15', 0.00146364134346365, 218957.62845064938, 0.5696088149080369, 10.286211071684)]",
+      "friendlyResponse": "- The closest an asteroid will come to Earth in the next year is **2026 TP6**.\n- It will approach Earth on **2026-10-15**.\n- The closest approach distance is **218,958 km** or **0.5696 lunar distances**.\n- The asteroid's velocity is **10.29 km/s**.",
+      "error": "None",
+      "gold_sql": "SELECT dist_km FROM close_approaches WHERE approach_date BETWEEN date('now') AND date('now', '+1 year') ORDER BY dist_km LIMIT 1",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT designation, approach_date, dist_au, dist_km, dist_ld, velocity_kms\nFROM close_approaches\nWHERE approach_date >= date('now') AND approach_date < date('now', '+1 year')\nORDER BY dist_au ASC\nLIMIT 1;",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 9457,
+        "sql_exec": 17.7,
+        "answer_llm": 4742,
+        "total": 14218
+      }
+    },
+    {
+      "question": "When will Apophis pass Earth, and how close will it get?",
+      "sql": "SELECT approach_date, dist_ld\nFROM close_approaches\nWHERE designation = '99942 Apophis (2004 MN4)'\nORDER BY approach_date ASC\nLIMIT 1;",
+      "queryRawResponse": "[]",
+      "friendlyResponse": "Nothing matched.",
+      "error": "None",
+      "gold_sql": "SELECT ca.dist_km FROM close_approaches ca JOIN asteroids a ON a.designation = ca.designation WHERE a.name = 'Apophis' AND ca.approach_date >= date('now') ORDER BY ca.approach_time LIMIT 1",
+      "execution_match": false,
+      "attempts": [
+        {
+          "sql": "SELECT approach_date, dist_ld\nFROM close_approaches\nWHERE designation = '99942 Apophis (2004 MN4)'\nORDER BY approach_date ASC\nLIMIT 1;",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 9884,
+        "sql_exec": 1.0,
+        "answer_llm": 2368,
+        "total": 12253
+      }
+    },
+    {
+      "question": "Which asteroid has the highest chance of hitting Earth?",
+      "sql": "SELECT designation, full_name, impact_probability, first_year, last_year, palermo_scale_cum, diameter_km\nFROM impact_risk\nORDER BY impact_probability DESC\nLIMIT 1;",
+      "queryRawResponse": "[('2010 RF12', '(2010 RF12)', 0.102637259069, 2095, 2122, -2.96, 0.0071)]",
+      "friendlyResponse": "- Asteroid 2010 RF12 has the highest chance of hitting Earth, with an impact probability of about 1 in 10. It has a diameter of 0.0071 km and is classified as potentially hazardous.",
+      "error": "None",
+      "gold_sql": "SELECT full_name FROM impact_risk ORDER BY impact_probability DESC LIMIT 1",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT designation, full_name, impact_probability, first_year, last_year, palermo_scale_cum, diameter_km\nFROM impact_risk\nORDER BY impact_probability DESC\nLIMIT 1;",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 10688,
+        "sql_exec": 2.0,
+        "answer_llm": 4475,
+        "total": 15165
+      }
+    },
+    {
+      "question": "How many potentially hazardous asteroids are bigger than 1 km?",
+      "sql": "SELECT COUNT(DISTINCT designation) FROM asteroids WHERE is_pha = 1 AND diameter_est_km > 1;",
+      "queryRawResponse": "[(156,)]",
+      "friendlyResponse": "- There are 156 potentially hazardous asteroids bigger than 1 km.",
+      "error": "None",
+      "gold_sql": "SELECT COUNT(*) FROM asteroids WHERE is_pha = 1 AND diameter_est_km > 1",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT COUNT(DISTINCT designation) FROM asteroids WHERE is_pha = 1 AND diameter_est_km > 1;",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 11398,
+        "sql_exec": 590.2,
+        "answer_llm": 2974,
+        "total": 14963
+      }
+    },
+    {
+      "question": "What is the largest asteroid?",
+      "sql": "SELECT full_name, diameter_est_km FROM asteroids ORDER BY diameter_est_km DESC LIMIT 1",
+      "queryRawResponse": "[('136199 Eris (2003 UB313)', 6345.428620404627)]",
+      "friendlyResponse": "- The largest asteroid is 136199 Eris (2003 UB313), with a diameter of 6,345 km.",
+      "error": "None",
+      "gold_sql": "SELECT full_name FROM asteroids ORDER BY diameter_est_km DESC LIMIT 1",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT full_name, diameter_est_km FROM asteroids ORDER BY diameter_est_km DESC LIMIT 1",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 12700,
+        "sql_exec": 1.1,
+        "answer_llm": 3967,
+        "total": 16669
+      }
+    },
+    {
+      "question": "Which asteroids passed closer than the Moon in 2025?",
+      "sql": "SELECT designation, full_name, moid_ld\nFROM close_approaches\nWHERE approach_date LIKE '2025%'\n  AND moid_ld < 1\nORDER BY moid_ld ASC\nLIMIT 25;",
+      "queryRawResponse": "[]",
+      "friendlyResponse": "Sorry, I couldn't turn that into a working database query. Try rephrasing it, for example with a specific distance, date or asteroid name.",
+      "error": "OperationalError: no such column: moid_ld",
+      "gold_sql": "SELECT full_name FROM close_approaches WHERE approach_date BETWEEN '2025-01-01' AND '2025-12-31' AND dist_ld < 1",
+      "execution_match": false,
+      "attempts": [
+        {
+          "sql": "SELECT designation, full_name, moid_ld\nFROM close_approaches\nWHERE approach_date LIKE '2025%'\n  AND moid_ld < 1\nORDER BY moid_ld ASC\nLIMIT 25;",
+          "error": "OperationalError: no such column: moid_ld"
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 13679,
+        "total": 13680
+      }
+    },
+    {
+      "question": "How many asteroids have names?",
+      "sql": "SELECT COUNT(DISTINCT name) FROM asteroids WHERE name IS NOT NULL;",
+      "queryRawResponse": "[(26567,)]",
+      "friendlyResponse": "- There are 26,567 asteroids with names in the database.",
+      "error": "None",
+      "gold_sql": "SELECT COUNT(*) FROM asteroids WHERE name IS NOT NULL",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT COUNT(DISTINCT name) FROM asteroids WHERE name IS NOT NULL;",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 1228,
+        "sql_exec": 45.5,
+        "answer_llm": 3558,
+        "total": 4832
+      }
+    },
+    {
+      "question": "What percentage of near-Earth asteroids are potentially hazardous?",
+      "sql": "SELECT CAST(SUM(CASE WHEN is_pha = 1 THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(*) FROM asteroids WHERE is_neo = 1;",
+      "queryRawResponse": "[(5.967424880651502,)]",
+      "friendlyResponse": "- 5.97% of near-Earth asteroids are potentially hazardous.",
+      "error": "None",
+      "gold_sql": "SELECT 100.0 * SUM(is_pha) / COUNT(*) FROM asteroids WHERE is_neo = 1",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT CAST(SUM(CASE WHEN is_pha = 1 THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(*) FROM asteroids WHERE is_neo = 1;",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 13247,
+        "sql_exec": 12.5,
+        "answer_llm": 3826,
+        "total": 17085
+      }
+    },
+    {
+      "question": "Which upcoming year will have the most asteroid flybys closer than the Moon?",
+      "sql": "SELECT T1.approach_date, COUNT(DISTINCT T1.designation) AS flyby_count\nFROM close_approaches AS T1\nWHERE T1.dist_ld < 1\n  AND T1.approach_date > date('now')\nGROUP BY T1.approach_date\nORDER BY flyby_count DESC\nLIMIT 1;",
+      "queryRawResponse": "[('2189-11-18', 1)]",
+      "friendlyResponse": "- The year 2189 will have the most asteroid flybys closer than the Moon.",
+      "error": "None",
+      "gold_sql": "SELECT substr(approach_date, 1, 4) FROM close_approaches WHERE dist_ld < 1 AND approach_date >= date('now') GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1",
+      "execution_match": false,
+      "attempts": [
+        {
+          "sql": "SELECT T1.approach_date, COUNT(DISTINCT T1.designation) AS flyby_count\nFROM close_approaches AS T1\nWHERE T1.dist_ld < 1\n  AND T1.approach_date > date('now')\nGROUP BY T1.approach_date\nORDER BY flyby_count DESC\nLIMIT 1;",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 14260,
+        "sql_exec": 11.9,
+        "answer_llm": 4047,
+        "total": 18319
+      }
+    },
+    {
+      "question": "What is the fastest an asteroid has ever flown past Earth?",
+      "sql": "SELECT MAX(velocity_kms) FROM close_approaches",
+      "queryRawResponse": "[(67.3744736543721,)]",
+      "friendlyResponse": "- The fastest asteroid ever to fly past Earth has a velocity of 67.37 km/s.",
+      "error": "None",
+      "gold_sql": "SELECT MAX(velocity_kms) FROM close_approaches WHERE approach_date <= date('now')",
+      "execution_match": true,
+      "attempts": [
+        {
+          "sql": "SELECT MAX(velocity_kms) FROM close_approaches",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 11521,
+        "sql_exec": 13.6,
+        "answer_llm": 3261,
+        "total": 14796
+      }
+    },
+    {
+      "question": "How many asteroids have orbits that come within 0.05 au of Earth's orbit?",
+      "sql": "SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE moid_au <= 0.05;",
+      "queryRawResponse": "[]",
+      "friendlyResponse": "Sorry, I couldn't turn that into a working database query. Try rephrasing it, for example with a specific distance, date or asteroid name.",
+      "error": "OperationalError: no such column: moid_au",
+      "gold_sql": "SELECT COUNT(*) FROM asteroids WHERE moid_au <= 0.05",
+      "execution_match": false,
+      "attempts": [
+        {
+          "sql": "SELECT COUNT(DISTINCT designation) FROM close_approaches WHERE moid_au <= 0.05;",
+          "error": "OperationalError: no such column: moid_au"
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 11720,
+        "total": 11721
+      }
+    },
+    {
+      "question": "Is any asteroid going to hit Earth?",
+      "sql": "SELECT designation FROM impact_risk WHERE impact_probability > 0",
+      "queryRawResponse": "[('2011 TO',), ('2012 BA102',), ('2014 HN197',), ('2009 DV',), ('2009 EH1',), ('2024 VK2',), ('2025 CB8',), ('2025 DB15',), ('2025 FZ6',), ('2025 HC',), ('2025 HO',), ('2025 HS18',), ('2025 HX',), ('2013 EV27',), ('2015 FC345',), ('2020 VB3',), ('2020 VO1',), ('2021 LY1',), ('2021 NM3',), ('2018 FE3',)]",
+      "friendlyResponse": "Yes, there are asteroids going to hit Earth. The query found 1000+ asteroids with an impact probability greater than 0, indicating potential impacts within the next 1900-2200 years.",
+      "error": "None",
+      "gold_sql": null,
+      "execution_match": null,
+      "attempts": [
+        {
+          "sql": "SELECT designation FROM impact_risk WHERE impact_probability > 0",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 876,
+        "sql_exec": 0.7,
+        "answer_llm": 7337,
+        "total": 8214
+      }
+    },
+    {
+      "question": "Will we have a problem with any of the biggest near-Earth asteroids?",
+      "sql": "SELECT COUNT(DISTINCT designation) FROM asteroids WHERE is_neo = 1 AND diameter_est_km > 1000",
+      "queryRawResponse": "[(0,)]",
+      "friendlyResponse": "No problem with any of the biggest near-Earth asteroids.",
+      "error": "None",
+      "gold_sql": null,
+      "execution_match": null,
+      "attempts": [
+        {
+          "sql": "SELECT COUNT(DISTINCT designation) FROM asteroids WHERE is_neo = 1 AND diameter_est_km > 1000",
+          "error": null
+        }
+      ],
+      "timings_ms": {
+        "sql_llm_1": 11845,
+        "sql_exec": 404.2,
+        "answer_llm": 3063,
+        "total": 15313
+      }
+    }
+  ]
+}

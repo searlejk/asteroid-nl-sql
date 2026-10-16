@@ -1,0 +1,6 @@
+{
+    "provider": "auto",
+    "openaiKey": "need to replace with your open ai key",
+    "openaiModel": "gpt-4o",
+    "localModelPath": "models/qwen2.5-coder-3b-instruct-q4_k_m.gguf"
+}
