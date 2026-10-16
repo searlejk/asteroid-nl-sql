@@ -11,13 +11,19 @@ My database holds **every asteroid NASA/JPL tracks**: 1,573,578 of them, includi
 | Working code files | this repo (see [Files](#files)) |
 | The SQLite database | `asteroids.db.gz` on the [Releases page](https://github.com/searlejk/asteroid-nl-sql/releases/latest) (520 MB unzipped, too big to commit), or rebuild it with `python3 build_db.py` |
 | Description of the database | the paragraph above |
-| Picture of the schema | [schema.png](schema.png) |
+| Picture of the schema | [schema_drawsql.png](schema_drawsql.png) (made in [drawSQL](https://drawsql.app)), plus [schema.png](schema.png) (generated with Graphviz) |
 | A question, SQL and response that worked | [SAMPLES.md](SAMPLES.md#a-question-it-did-well-on) |
 | A question, SQL and response that didn't work | [SAMPLES.md](SAMPLES.md#a-question-it-tripped-up-on) |
 | A file with at least 6 other examples | [EXAMPLES.md](EXAMPLES.md) (every question × every strategy is in [responses/ALL_RESULTS.md](responses/ALL_RESULTS.md)) |
 | Prompting strategies tried and the differences | [Prompting strategies](#prompting-strategies) |
 
 Data comes from three public NASA/JPL Solar System Dynamics APIs: [SBDB Query](https://ssd-api.jpl.nasa.gov/doc/sbdb_query.html) (orbits and sizes), [Close Approach Data](https://ssd-api.jpl.nasa.gov/doc/cad.html) (flybys) and [Sentry](https://ssd-api.jpl.nasa.gov/doc/sentry.html) (impact risk).
+
+### Schema diagram (drawSQL)
+
+<img src="schema_drawsql.png" width="480">
+
+Made by importing [drawsql_schema.sql](drawsql_schema.sql) into [drawSQL](https://drawsql.app). `close_approaches` and `impact_risk` link to `asteroids` by `designation`, and `asteroids.orbit_class` links to `orbit_classes.code`. The small `dataset_info` table (download date and sources) isn't connected to anything and is left out of this picture.
 
 ## How it works
 
@@ -188,6 +194,7 @@ The SQL returned all 28 Apophis flybys. The answer stitched "April 13" from 2029
 | [server.py](server.py), [web/](web/) | web app (Python standard library, no framework) |
 | [run_experiments.py](run_experiments.py), [questions.json](questions.json) | strategy comparison with execution accuracy |
 | [make_schema_png.py](make_schema_png.py) | draws `schema.png` with Graphviz |
+| [drawsql_schema.sql](drawsql_schema.sql), [schema_drawsql.png](schema_drawsql.png) | the schema as a drawSQL import (PostgreSQL syntax, with the relationships declared as foreign keys), and the resulting diagram |
 | [tests/test_readonly.py](tests/test_readonly.py) | proves the DB can't be modified |
 
 `config.json` (your API key), `models/` and `data/*.db` are git-ignored. The full database is 520 MB, too big for GitHub, so rebuild it with `build_db.py`. `--neo-only` makes a small one.
